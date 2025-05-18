@@ -111,12 +111,28 @@ try:
     # Try to get Firebase credentials from environment variable
     firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS')
     if firebase_credentials:
-        cred_dict = json.loads(firebase_credentials)
-        cred = credentials.Certificate(cred_dict)
+        try:
+            # Try parsing as JSON string first
+            cred_dict = json.loads(firebase_credentials)
+            cred = credentials.Certificate(cred_dict)
+            logger.info("Successfully loaded Firebase credentials from environment variable")
+        except json.JSONDecodeError:
+            # If not JSON, try as file path
+            if os.path.exists(firebase_credentials):
+                cred = credentials.Certificate(firebase_credentials)
+                logger.info(f"Successfully loaded Firebase credentials from file: {firebase_credentials}")
+            else:
+                raise Exception(f"Firebase credentials file not found: {firebase_credentials}")
     else:
         # Fallback to local credentials file
-        cred = credentials.Certificate("floodpath-1c7ef-firebase-adminsdk-fbsvc-957288a212.json")
+        local_cred_path = "floodpath-1c7ef-firebase-adminsdk-fbsvc-b3ab4ffc1d.json"
+        if os.path.exists(local_cred_path):
+            cred = credentials.Certificate(local_cred_path)
+            logger.info(f"Successfully loaded Firebase credentials from local file: {local_cred_path}")
+        else:
+            raise Exception("No Firebase credentials found in environment or local file")
     
+    # Initialize Firebase app
     firebase_admin.initialize_app(cred, {
         'databaseURL': os.environ.get('FIREBASE_DATABASE_URL', 'https://floodpath-1c7ef.firebaseio.com')
     })
