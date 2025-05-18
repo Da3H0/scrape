@@ -6,7 +6,7 @@ services:
       # Install system dependencies
       echo "Installing system dependencies..."
       apt-get update
-      apt-get install -y wget gnupg unzip xvfb libxi6 libgconf-2-4 curl lsb-release
+      apt-get install -y wget gnupg unzip xvfb libxi6 libgconf-2-4 curl lsb-release libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libatspi2.0-0
 
       # Install Python dependencies
       echo "Installing Python dependencies..."
@@ -15,8 +15,12 @@ services:
 
       # Install Playwright browsers
       echo "Installing Playwright browsers..."
-      playwright install chromium
-      playwright install-deps
+      python -m playwright install chromium
+      python -m playwright install-deps chromium
+
+      # Verify installation
+      echo "Verifying Playwright installation..."
+      python -m playwright --version
     startCommand: |
       # Start Xvfb
       echo "Starting Xvfb..."
