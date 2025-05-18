@@ -941,13 +941,13 @@ def index():
             # Try to get dates from water_levels_dates collection first
             water_dates_doc = db.collection('water_levels_dates').document('all_dates').get()
             if water_dates_doc.exists:
-                available_dates = water_dates_doc.get('dates', [])
+                available_dates = water_dates_doc.to_dict().get('dates', [])
             
             # If no dates found, try rainfall_dates collection
             if not available_dates:
                 rainfall_dates_doc = db.collection('rainfall_dates').document('all_dates').get()
                 if rainfall_dates_doc.exists:
-                    available_dates = rainfall_dates_doc.get('dates', [])
+                    available_dates = rainfall_dates_doc.to_dict().get('dates', [])
             
             # If still no dates, try to get from collections directly
             if not available_dates:

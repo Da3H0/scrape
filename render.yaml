@@ -2,8 +2,32 @@ services:
   - type: web
     name: floodpath-api
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    buildCommand: |
+      # Install Chrome dependencies
+      apt-get update
+      apt-get install -y wget gnupg unzip xvfb libxi6 libgconf-2-4 curl
+      
+      # Install Chrome
+      curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
+      apt-get update
+      apt-get install -y google-chrome-stable
+      
+      # Install ChromeDriver
+      CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
+      wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/$CHROME_VERSION.0.5735.90/linux64/chromedriver-linux64.zip"
+      unzip chromedriver-linux64.zip
+      mv chromedriver-linux64/chromedriver /usr/local/bin/
+      chmod +x /usr/local/bin/chromedriver
+      
+      # Install Python dependencies
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      # Start Xvfb
+      Xvfb :99 -screen 0 1024x768x16 &
+      # Start the application
+      gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
