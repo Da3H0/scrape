@@ -1,11 +1,6 @@
 from flask import Flask, jsonify, render_template_string, request
 from flask_restful import Api, Resource
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import threading
@@ -349,72 +344,18 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def get_chrome_options():
-    """Configure Chrome options for cloud environment"""
-    options = webdriver.ChromeOptions()
-    
-    # Basic headless configuration
-    options.add_argument('--headless=new')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    
-    # Memory and performance optimizations
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-infobars')
-    options.add_argument('--disable-notifications')
-    options.add_argument('--disable-popup-blocking')
-    options.add_argument('--disable-save-password-bubble')
-    options.add_argument('--disable-translate')
-    options.add_argument('--disable-web-security')
-    options.add_argument('--disable-features=IsolateOrigins,site-per-process')
-    options.add_argument('--disable-site-isolation-trials')
-    options.add_argument('--allow-running-insecure-content')
-    options.add_argument('--ignore-certificate-errors')
-    options.add_argument('--ignore-ssl-errors')
-    
-    # Memory management
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu-sandbox')
-    options.add_argument('--disable-setuid-sandbox')
-    options.add_argument('--no-first-run')
-    options.add_argument('--no-zygote')
-    options.add_argument('--single-process')
-    options.add_argument('--disable-accelerated-2d-canvas')
-    options.add_argument('--disable-gl-drawing-for-tests')
-    
-    # Process management
-    options.add_argument('--disable-background-networking')
-    options.add_argument('--disable-background-timer-throttling')
-    options.add_argument('--disable-backgrounding-occluded-windows')
-    options.add_argument('--disable-breakpad')
-    options.add_argument('--disable-component-extensions-with-background-pages')
-    options.add_argument('--disable-default-apps')
-    options.add_argument('--disable-features=TranslateUI')
-    options.add_argument('--disable-ipc-flooding-protection')
-    options.add_argument('--disable-renderer-backgrounding')
-    options.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
-    
-    # Window and display settings
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('--start-maximized')
-    options.add_argument('--force-color-profile=srgb')
-    options.add_argument('--hide-scrollbars')
-    
-    # User agent
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    # Add experimental options
-    options.add_experimental_option('excludeSwitches', ['enable-automation'])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
-    
-    # Add proxy support if configured
-    proxy = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
-    if proxy:
-        options.add_argument(f'--proxy-server={proxy}')
-    
-    return options
+def initialize_browser():
+    """Initialize and return a configured browser instance"""
+    try:
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox']
+        )
+        return browser, playwright
+    except Exception as e:
+        logger.error(f"Error initializing browser: {str(e)}")
+        return None, None
 
 def calculate_data_hash(data):
     """Calculate a hash of the data to detect changes"""
@@ -492,95 +433,6 @@ def save_to_firebase(collection_name, data, timestamp):
         except Exception as e:
             logger.error(f"Error saving to Firebase {collection_name}: {str(e)}")
 
-def initialize_webdriver():
-    """Initialize and return a configured webdriver instance"""
-    max_retries = 3
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            logger.info(f"Initializing webdriver (attempt {retry_count + 1}/{max_retries})...")
-            options = get_chrome_options()
-            
-            # Log Chrome binary path in production
-            if os.environ.get('RENDER'):
-                logger.info("Running in production environment (Render)")
-                chrome_path = os.environ.get('CHROME_BIN', '/usr/bin/google-chrome-stable')
-                logger.info(f"Chrome binary path: {chrome_path}")
-                
-                # Verify Chrome binary exists
-                if not os.path.exists(chrome_path):
-                    logger.error(f"Chrome binary not found at {chrome_path}")
-                    # Try to find Chrome in common locations
-                    common_paths = [
-                        '/usr/bin/google-chrome-stable',
-                        '/usr/bin/google-chrome',
-                        '/usr/bin/chrome',
-                        '/usr/bin/chromium',
-                        '/usr/bin/chromium-browser'
-                    ]
-                    for path in common_paths:
-                        if os.path.exists(path):
-                            logger.info(f"Found Chrome at {path}")
-                            chrome_path = path
-                            break
-                    else:
-                        logger.error("Chrome not found in common locations")
-                        retry_count += 1
-                        time.sleep(5)
-                        continue
-                
-                options.binary_location = chrome_path
-                
-                # Add display configuration for headless mode
-                os.environ['DISPLAY'] = ':99'
-            
-            # Try to use Chrome from PATH first
-            try:
-                logger.info("Attempting to use Chrome from PATH...")
-                service = Service()
-                driver = webdriver.Chrome(service=service, options=options)
-                driver.set_page_load_timeout(60)  # Increased timeout to 60 seconds
-                
-                # Test the driver with a simple operation
-                driver.get("about:blank")
-                if driver.current_url != "about:blank":
-                    raise Exception("Failed to load test page")
-                
-                logger.info("Successfully initialized Chrome from PATH")
-                return driver
-            except Exception as e:
-                logger.warning(f"Failed to use Chrome from PATH: {str(e)}")
-            
-            # Fallback to ChromeDriverManager
-            try:
-                logger.info("Attempting to use ChromeDriverManager...")
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=options)
-                driver.set_page_load_timeout(60)  # Increased timeout to 60 seconds
-                
-                # Test the driver with a simple operation
-                driver.get("about:blank")
-                if driver.current_url != "about:blank":
-                    raise Exception("Failed to load test page")
-                
-                logger.info("Successfully initialized Chrome with ChromeDriverManager")
-                return driver
-            except Exception as e:
-                logger.error(f"Failed to initialize Chrome with ChromeDriverManager: {str(e)}")
-                retry_count += 1
-                time.sleep(5)
-                continue
-            
-        except Exception as e:
-            logger.error(f"Error initializing webdriver: {str(e)}")
-            retry_count += 1
-            time.sleep(5)
-            continue
-    
-    logger.error("Failed to initialize webdriver after maximum retries")
-    return None
-
 def scrape_pagasa_water_level():
     """Scrapes the water level data table from PAGASA website"""
     global latest_water_data, last_updated, last_water_hash
@@ -589,12 +441,13 @@ def scrape_pagasa_water_level():
     max_failures = 5  # Maximum number of consecutive failures before longer delay
     
     while scraping_active:
-        driver = None
+        browser = None
+        playwright = None
         try:
             logger.info("Starting water level scraping...")
-            driver = initialize_webdriver()
-            if not driver:
-                logger.error("Failed to initialize webdriver for water level scraping")
+            browser, playwright = initialize_browser()
+            if not browser:
+                logger.error("Failed to initialize browser for water level scraping")
                 consecutive_failures += 1
                 time.sleep(60 * min(consecutive_failures, max_failures))
                 continue
@@ -606,100 +459,91 @@ def scrape_pagasa_water_level():
             while navigation_retry_count < max_navigation_retries:
                 try:
                     logger.info("Navigating to water level page...")
-                    driver.set_page_load_timeout(60)  # Increased timeout to 60 seconds
-                    driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/table.do")
+                    page = browser.new_page()
+                    page.goto("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/table.do", wait_until="networkidle")
                     
-                    # Wait for table to load with increased timeout
+                    # Wait for table to load
                     logger.info("Waiting for water level table to load...")
-                    WebDriverWait(driver, 60).until(  # Increased timeout to 60 seconds
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
-                    )
-                    time.sleep(15)  # Increased wait time
+                    page.wait_for_selector("table.table-type1", timeout=60000)
+                    time.sleep(15)  # Additional wait time
                     
-                    # Check if page is loaded
-                    if "table.do" not in driver.current_url:
-                        raise Exception("Failed to load water level page")
+                    # Get page content
+                    html = page.content()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    search_time_div = soup.find('div', {'class': 'search-time'})
+                    search_time = search_time_div.get_text(strip=True) if search_time_div else datetime.now().strftime("%Y-%m-%d %H:%M")
+                    
+                    table = soup.find('table', {'class': 'table-type1'})
+                    if not table:
+                        raise Exception("Could not find water level data table")
+                    
+                    data = []
+                    for row in table.find('tbody').find_all('tr'):
+                        cols = row.find_all(['th', 'td'])
+                        if len(cols) >= 7:
+                            station = cols[0].get_text(strip=True)
+                            current_wl = cols[1].get_text(strip=True)
+                            wl_30min = cols[2].get_text(strip=True)
+                            wl_1hr = cols[3].get_text(strip=True)
+                            alert = cols[4].get_text(strip=True)
+                            alarm = cols[5].get_text(strip=True)
+                            critical = cols[6].get_text(strip=True)
+                            
+                            data.append({
+                                'station': station,
+                                'current_wl': current_wl,
+                                'wl_30min': wl_30min,
+                                'wl_1hr': wl_1hr,
+                                'alert_level': alert,
+                                'alarm_level': alarm,
+                                'critical_level': critical,
+                                'timestamp': search_time
+                            })
+                    
+                    if not data:
+                        raise Exception("No water level data was scraped")
+                    
+                    # Reset consecutive failures on success
+                    consecutive_failures = 0
+                    
+                    # Calculate hash of new data
+                    new_hash = calculate_data_hash(data)
+                    
+                    # Only update if data has changed
+                    if new_hash != last_water_hash:
+                        latest_water_data = data
+                        last_updated = search_time
+                        last_water_hash = new_hash
+                        
+                        # Save to Firebase
+                        save_to_firebase('water_levels', data, search_time)
+                        logger.info(f"Water level data updated at {search_time}")
+                    else:
+                        logger.info("No changes in water level data")
                     
                     break  # If successful, break the retry loop
                 except Exception as e:
                     navigation_retry_count += 1
                     logger.error(f"Navigation attempt {navigation_retry_count} failed: {str(e)}")
                     if navigation_retry_count < max_navigation_retries:
-                        time.sleep(10)  # Increased wait time between retries
+                        time.sleep(10)
                         continue
                     else:
                         raise  # Re-raise the exception if all retries failed
-            
-            html = driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            search_time_div = soup.find('div', {'class': 'search-time'})
-            search_time = search_time_div.get_text(strip=True) if search_time_div else datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            table = soup.find('table', {'class': 'table-type1'})
-            if not table:
-                logger.error("Could not find water level data table")
-                consecutive_failures += 1
-                time.sleep(60 * min(consecutive_failures, max_failures))
-                continue
-            
-            data = []
-            for row in table.find('tbody').find_all('tr'):
-                cols = row.find_all(['th', 'td'])
-                if len(cols) >= 7:
-                    station = cols[0].get_text(strip=True)
-                    current_wl = cols[1].get_text(strip=True)
-                    wl_30min = cols[2].get_text(strip=True)
-                    wl_1hr = cols[3].get_text(strip=True)
-                    alert = cols[4].get_text(strip=True)
-                    alarm = cols[5].get_text(strip=True)
-                    critical = cols[6].get_text(strip=True)
-                    
-                    data.append({
-                        'station': station,
-                        'current_wl': current_wl,
-                        'wl_30min': wl_30min,
-                        'wl_1hr': wl_1hr,
-                        'alert_level': alert,
-                        'alarm_level': alarm,
-                        'critical_level': critical,
-                        'timestamp': search_time
-                    })
-            
-            if not data:
-                logger.error("No water level data was scraped")
-                consecutive_failures += 1
-                time.sleep(60 * min(consecutive_failures, max_failures))
-                continue
-            
-            # Reset consecutive failures on success
-            consecutive_failures = 0
-            
-            # Calculate hash of new data
-            new_hash = calculate_data_hash(data)
-            
-            # Only update if data has changed
-            if new_hash != last_water_hash:
-                latest_water_data = data
-                last_updated = search_time
-                last_water_hash = new_hash
-                
-                # Save to Firebase
-                save_to_firebase('water_levels', data, search_time)
-                logger.info(f"Water level data updated at {search_time}")
-            else:
-                logger.info("No changes in water level data")
+                finally:
+                    if page:
+                        page.close()
             
         except Exception as e:
             logger.error(f"Error during water level scraping: {str(e)}")
             consecutive_failures += 1
             time.sleep(60 * min(consecutive_failures, max_failures))
         finally:
-            if driver:
-                try:
-                    driver.quit()
-                except Exception as e:
-                    logger.error(f"Error quitting webdriver: {str(e)}")
+            if browser:
+                browser.close()
+            if playwright:
+                playwright.stop()
         
         # Calculate next scrape time to maintain 5-minute intervals
         next_scrape = datetime.now() + timedelta(minutes=5)
@@ -713,12 +557,13 @@ def scrape_pagasa_rainfall():
     max_failures = 5  # Maximum number of consecutive failures before longer delay
     
     while scraping_active:
-        driver = None
+        browser = None
+        playwright = None
         try:
             logger.info("Starting rainfall scraping...")
-            driver = initialize_webdriver()
-            if not driver:
-                logger.error("Failed to initialize webdriver for rainfall scraping")
+            browser, playwright = initialize_browser()
+            if not browser:
+                logger.error("Failed to initialize browser for rainfall scraping")
                 consecutive_failures += 1
                 time.sleep(60 * min(consecutive_failures, max_failures))
                 continue
@@ -730,101 +575,92 @@ def scrape_pagasa_rainfall():
             while navigation_retry_count < max_navigation_retries:
                 try:
                     logger.info("Navigating to rainfall page...")
-                    driver.set_page_load_timeout(60)  # Increased timeout to 60 seconds
-                    driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/rainfall/table.do")
+                    page = browser.new_page()
+                    page.goto("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/rainfall/table.do", wait_until="networkidle")
                     
-                    # Wait for table to load with increased timeout
-                    WebDriverWait(driver, 60).until(  # Increased timeout to 60 seconds
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
-                    )
-                    time.sleep(15)  # Increased wait time
+                    # Wait for table to load
+                    page.wait_for_selector("table.table-type1", timeout=60000)
+                    time.sleep(15)  # Additional wait time
                     
-                    # Check if page is loaded
-                    if "table.do" not in driver.current_url:
-                        raise Exception("Failed to load rainfall page")
+                    # Get page content
+                    html = page.content()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    search_time_div = soup.find('div', {'class': 'search-time'})
+                    search_time = search_time_div.get_text(strip=True) if search_time_div else datetime.now().strftime("%Y-%m-%d %H:%M")
+                    
+                    table = soup.find('table', {'class': 'table-type1'})
+                    if not table:
+                        raise Exception("Could not find rainfall data table")
+                    
+                    data = []
+                    for row in table.find('tbody').find_all('tr'):
+                        cols = row.find_all(['th', 'td'])
+                        if len(cols) >= 8:
+                            station = cols[0].get_text(strip=True)
+                            current_rf = cols[1].get_text(strip=True)
+                            rf_30min = cols[2].get_text(strip=True)
+                            rf_1hr = cols[3].get_text(strip=True)
+                            rf_3hr = cols[4].get_text(strip=True)
+                            rf_6hr = cols[5].get_text(strip=True)
+                            rf_12hr = cols[6].get_text(strip=True)
+                            rf_24hr = cols[7].get_text(strip=True)
+                            
+                            data.append({
+                                'station': station,
+                                'current_rf': current_rf,
+                                'rf_30min': rf_30min,
+                                'rf_1hr': rf_1hr,
+                                'rf_3hr': rf_3hr,
+                                'rf_6hr': rf_6hr,
+                                'rf_12hr': rf_12hr,
+                                'rf_24hr': rf_24hr,
+                                'timestamp': search_time
+                            })
+                    
+                    if not data:
+                        raise Exception("No rainfall data was scraped")
+                    
+                    # Reset consecutive failures on success
+                    consecutive_failures = 0
+                    
+                    # Calculate hash of new data
+                    new_hash = calculate_data_hash(data)
+                    
+                    # Only update if data has changed
+                    if new_hash != last_rainfall_hash:
+                        latest_rainfall_data = data
+                        last_updated = search_time
+                        last_rainfall_hash = new_hash
+                        
+                        # Save to Firebase
+                        save_to_firebase('rainfall_data', data, search_time)
+                        logger.info(f"Rainfall data updated at {search_time}")
+                    else:
+                        logger.info("No changes in rainfall data")
                     
                     break  # If successful, break the retry loop
                 except Exception as e:
                     navigation_retry_count += 1
                     logger.error(f"Navigation attempt {navigation_retry_count} failed: {str(e)}")
                     if navigation_retry_count < max_navigation_retries:
-                        time.sleep(10)  # Increased wait time between retries
+                        time.sleep(10)
                         continue
                     else:
                         raise  # Re-raise the exception if all retries failed
-            
-            html = driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            search_time_div = soup.find('div', {'class': 'search-time'})
-            search_time = search_time_div.get_text(strip=True) if search_time_div else datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            table = soup.find('table', {'class': 'table-type1'})
-            if not table:
-                logger.error("Could not find rainfall data table")
-                consecutive_failures += 1
-                time.sleep(60 * min(consecutive_failures, max_failures))
-                continue
-            
-            data = []
-            for row in table.find('tbody').find_all('tr'):
-                cols = row.find_all(['th', 'td'])
-                if len(cols) >= 8:
-                    station = cols[0].get_text(strip=True)
-                    current_rf = cols[1].get_text(strip=True)
-                    rf_30min = cols[2].get_text(strip=True)
-                    rf_1hr = cols[3].get_text(strip=True)
-                    rf_3hr = cols[4].get_text(strip=True)
-                    rf_6hr = cols[5].get_text(strip=True)
-                    rf_12hr = cols[6].get_text(strip=True)
-                    rf_24hr = cols[7].get_text(strip=True)
-                    
-                    data.append({
-                        'station': station,
-                        'current_rf': current_rf,
-                        'rf_30min': rf_30min,
-                        'rf_1hr': rf_1hr,
-                        'rf_3hr': rf_3hr,
-                        'rf_6hr': rf_6hr,
-                        'rf_12hr': rf_12hr,
-                        'rf_24hr': rf_24hr,
-                        'timestamp': search_time
-                    })
-            
-            if not data:
-                logger.error("No rainfall data was scraped")
-                consecutive_failures += 1
-                time.sleep(60 * min(consecutive_failures, max_failures))
-                continue
-            
-            # Reset consecutive failures on success
-            consecutive_failures = 0
-            
-            # Calculate hash of new data
-            new_hash = calculate_data_hash(data)
-            
-            # Only update if data has changed
-            if new_hash != last_rainfall_hash:
-                latest_rainfall_data = data
-                last_updated = search_time
-                last_rainfall_hash = new_hash
-                
-                # Save to Firebase
-                save_to_firebase('rainfall_data', data, search_time)
-                logger.info(f"Rainfall data updated at {search_time}")
-            else:
-                logger.info("No changes in rainfall data")
+                finally:
+                    if page:
+                        page.close()
             
         except Exception as e:
             logger.error(f"Error during rainfall scraping: {str(e)}")
             consecutive_failures += 1
             time.sleep(60 * min(consecutive_failures, max_failures))
         finally:
-            if driver:
-                try:
-                    driver.quit()
-                except Exception as e:
-                    logger.error(f"Error quitting webdriver: {str(e)}")
+            if browser:
+                browser.close()
+            if playwright:
+                playwright.stop()
         
         # Calculate next scrape time to maintain 5-minute intervals
         next_scrape = datetime.now() + timedelta(minutes=5)
@@ -978,9 +814,9 @@ def start_scrapers():
     try:
         # Test webdriver initialization before starting threads
         logger.info("Testing webdriver initialization...")
-        test_driver = initialize_webdriver()
-        if test_driver:
-            test_driver.quit()
+        test_browser, _ = initialize_browser()
+        if test_browser:
+            test_browser.close()
             logger.info("Webdriver test successful")
         else:
             logger.error("Webdriver test failed")
