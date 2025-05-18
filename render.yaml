@@ -13,14 +13,18 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
 
-      # Install Playwright browsers
+      # Install Playwright and browsers with explicit paths
       echo "Installing Playwright browsers..."
-      python -m playwright install chromium
-      python -m playwright install-deps chromium
-
-      # Verify installation
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright
+      python -m playwright install --with-deps chromium
+      
+      # Verify installation and browser path
       echo "Verifying Playwright installation..."
       python -m playwright --version
+      ls -la /opt/render/.cache/ms-playwright/chromium-*/chrome-linux/chrome
+      
+      # Set permissions
+      chmod -R 755 /opt/render/.cache/ms-playwright
     startCommand: |
       # Start Xvfb
       echo "Starting Xvfb..."
@@ -29,6 +33,10 @@ services:
       # Verify Xvfb is running
       echo "Verifying Xvfb..."
       ps aux | grep Xvfb
+      
+      # Set environment variables for Playwright
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright
+      export DISPLAY=:99
       
       # Start the application
       echo "Starting application..."
@@ -44,6 +52,8 @@ services:
         value: true
       - key: DISPLAY
         value: :99
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/.cache/ms-playwright
       - key: FIREBASE_CREDENTIALS
         sync: false
       - key: FIREBASE_DATABASE_URL
