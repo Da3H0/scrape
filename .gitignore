@@ -16,6 +16,7 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -24,7 +25,10 @@ var/
 venv/
 ENV/
 
-# Firebase credentials
+# Environment Variables
+.env
+
+# Firebase
 *firebase-adminsdk*.json
 
 # IDE
@@ -34,4 +38,8 @@ ENV/
 *.swo
 
 # Logs
-*.log 
+*.log
+
+# Chrome
+chromedriver
+chromedriver.exe 
