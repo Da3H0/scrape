@@ -4,29 +4,64 @@ services:
     env: python
     buildCommand: |
       # Install Chrome dependencies
+      echo "Installing Chrome dependencies..."
       apt-get update
-      apt-get install -y wget gnupg unzip xvfb libxi6 libgconf-2-4 curl
-      
+      apt-get install -y wget gnupg unzip xvfb libxi6 libgconf-2-4 curl lsb-release
+
+      # Add Chrome repository
+      echo "Setting up Chrome repository..."
+      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
+
       # Install Chrome
-      curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
+      echo "Installing Chrome..."
       apt-get update
       apt-get install -y google-chrome-stable
-      
+
+      # Verify Chrome installation
+      echo "Verifying Chrome installation..."
+      google-chrome --version || echo "Chrome installation failed"
+      which google-chrome || echo "Chrome binary not found in PATH"
+
       # Install ChromeDriver
+      echo "Installing ChromeDriver..."
       CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
-      wget -q "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/$CHROME_VERSION.0.5735.90/linux64/chromedriver-linux64.zip"
-      unzip chromedriver-linux64.zip
-      mv chromedriver-linux64/chromedriver /usr/local/bin/
+      echo "Chrome version: $CHROME_VERSION"
+      
+      # Download and install ChromeDriver
+      wget -q "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION"
+      CHROMEDRIVER_VERSION=$(cat "LATEST_RELEASE_$CHROME_VERSION")
+      echo "ChromeDriver version: $CHROMEDRIVER_VERSION"
+      
+      wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
+      unzip chromedriver_linux64.zip
+      mv chromedriver /usr/local/bin/
       chmod +x /usr/local/bin/chromedriver
       
+      # Verify ChromeDriver installation
+      echo "Verifying ChromeDriver installation..."
+      chromedriver --version || echo "ChromeDriver installation failed"
+      which chromedriver || echo "ChromeDriver binary not found in PATH"
+
       # Install Python dependencies
+      echo "Installing Python dependencies..."
       pip install --upgrade pip
       pip install -r requirements.txt
+
+      # List installed packages
+      echo "Installed packages:"
+      dpkg -l | grep -E 'chrome|chromium'
     startCommand: |
       # Start Xvfb
+      echo "Starting Xvfb..."
       Xvfb :99 -screen 0 1024x768x16 &
+      
+      # Verify Xvfb is running
+      echo "Verifying Xvfb..."
+      ps aux | grep Xvfb
+      
       # Start the application
+      echo "Starting application..."
       gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
